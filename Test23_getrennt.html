@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hausverwaltung Höhn Mitarbeiterportal</title>
+
+  <!-- FullCalendar Styles -->
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans&display=swap" rel="stylesheet">
+
+  <style>
+    /* ===================================== */
+    /*         LAYOUT UND BASISSTIL          */
+    /* ===================================== */
+    * { box-sizing: border-box; }
+    body { font-family: 'Open Sans', sans-serif; margin: 0; padding: 0; background: #f9f9f9; }
+    header { background-color: #A23D2B; color: white; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+    header img { max-height: 60px; }
+    .profile { text-align: right; margin-right: 10px; }
+    .layout { display: flex; }
+    main { flex: 3; padding: 20px; }
+    aside { flex: 1; padding: 20px; background: #fff; border-left: 1px solid #ccc; display: none; }
+    .show-calendar aside { display: block; }
+    .login-box, .dashboard, .section, .step-box, .modal { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    input, button, select { padding: 10px; margin-top: 10px; margin-bottom: 10px; width: 100%; }
+    .progress-bar { background: #ddd; border-radius: 5px; overflow: hidden; margin: 10px 0; }
+    .progress-bar-fill { height: 20px; background-color: #555; width: 0%; text-align: center; color: white; }
+    .step-button { background: #A23D2B; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; }
+    .step-button:hover { background: #7a291f; }
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; }
+    .modal-content { position: relative; background: white; padding: 20px; border-radius: 8px; max-height: 80vh; overflow-y: auto; width: 90%; max-width: 600px; }
+    .close { position: absolute; top: 10px; right: 20px; font-size: 30px; cursor: pointer; }
+  </style>
+</head>
+
+<body>
+  <!-- FullCalendar Script -->
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+
+  <!-- ===================================== -->
+  <!--            HEADER UND NAVIGATION     -->
+  <!-- ===================================== -->
+  <header>
+    <img src="Logo_HV.PNG" alt="Hausverwaltung Höhn Logo">
+    <div class="profile" id="profile"></div>
+  </header>
+
+  <div class="layout" id="layout">
+    <main id="content">
+      <!-- Login-Box -->
+      <div class="login-box" id="loginBox">
+        <h2>Login</h2>
+        <input type="text" id="name" placeholder="Name">
+        <input type="password" id="password" placeholder="Passwort">
+        <button onclick="login()">Anmelden</button>
+      </div>
+    </main>
+
+    <!-- ===================================== -->
+    <!--            AKTUELLES-REITER          -->
+    <!-- ===================================== -->
+    <aside id="aktuelles">
+      <div class="step-box">
+        <h3>Aktuelles</h3>
+        <ul id="eventList"></ul>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ===================================== -->
+  <!--            MODAL                      -->
+  <!-- ===================================== -->
+  <div class="modal" id="modal">
+    <div class="modal-content">
+      <span class="close" onclick="closeModal()">&times;</span>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- ===================================== -->
+  <!--            JAVASCRIPT                 -->
+  <!-- ===================================== -->
+  <script>
+    // =====================================
+    //    GLOBAL STATE & LOGIN / LOGOUT
+    // =====================================
+    let calendar;
+    let currentPhase = '';
+    let preboardingProgress = 0;
+    let onboardingProgress = 0;
+
+    function login() {
+      const name = document.getElementById('name').value.trim();
+      const pw = document.getElementById('password').value.trim();
+      if (name === 'P.Tröger' && pw === 'Masterarbeit') {
+        sessionStorage.setItem('userName', name);
+        document.getElementById('layout').classList.add('show-calendar');
+        loadDashboard();
+      } else {
+        alert('Falscher Name oder Passwort!');
+      }
+    }
+    function logout() {
+      sessionStorage.clear();
+      location.reload();
+    }
+
+    // =====================================
+    //    FullCalendar Init (global)
+    // =====================================
+    function initCalendar() {
+      const calEl = document.getElementById('calendar');
+      calendar = new FullCalendar.Calendar(calEl, {
+        initialView: 'dayGridMonth', locale: 'de', selectable: true,
+        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
+        dateClick: info => {
+          const t = prompt('Neuer Termin:');
+          if (t) { calendar.addEvent({ title: t, start: info.dateStr }); updateEventList(); }
+        },
+        events: []
+      });
+      calendar.render();
+      updateEventList();
+    }
+    function updateEventList() {
+      const list = document.getElementById('eventList');
+      const evs = calendar.getEvents().map(e=>({d:e.start,t:e.title})).sort((a,b)=>a.d-b.d);
+      list.innerHTML = '';
+      evs.forEach(ev=>{
+        const li=document.createElement('li');
+        li.textContent = `${ev.d.toLocaleDateString('de-DE')} – ${ev.t}`;
+        list.appendChild(li);
+      });
+    }
+
+    // =====================================
+    //    DASHBOARD UND LOGIN (Reiter)
+    // =====================================
+    function loadDashboard() {
+      const name = sessionStorage.getItem('userName') || 'Mitarbeiter';
+      const now = new Date();
+      const start = new Date('2025-06-19T08:00');
+      const post = new Date('2025-12-19T08:00');
+      let status;
+      if (now < start) { status='Preboarding'; currentPhase='Preboarding'; }
+      else if (now < post) { status='Onboarding'; currentPhase='Onboarding'; }
+      else { status='Postboarding'; currentPhase='Postboarding'; }
+
+      document.getElementById('content').innerHTML = `
+        <div class="dashboard">
+          <h2>Willkommen, ${name}</h2>
+          <p>Status: <strong>${status}</strong></p>
+          <nav>
+            <button onclick="loadPersoenliches()">Persönliches</button>
+            <button onclick="loadPreboarding()">Preboarding</button>
+            <button onclick="loadOnboarding()">Onboarding</button>
+            <button onclick="loadPostboarding()">Postboarding</button>
+            <button onclick="logout()">Logout</button>
+          </nav>
+          <div class="progress-bar"><div id="progressBar" class="progress-bar-fill"></div></div>
+        </div>
+        <!-- Kalender im Dashboard -->
+        <div id="calendar" style="margin-top:20px;"></div>
+      `;
+      updateProfileProgress();
+      loadProfile();
+      initCalendar();
+    }
+
+    function loadProfile() {
+      const p = document.getElementById('profile');
+      const fill = currentPhase==='Preboarding'?preboardingProgress:onboardingProgress;
+      p.innerHTML = `<div><strong>${sessionStorage.getItem('userName')}</strong></div><div>Status: <strong>${currentPhase}</strong></div><div class="progress-bar"><div class="progress-bar-fill" style="width:${fill}%"></div></div>`;
+    }
+    function updateProfileProgress() {
+      const bar = document.getElementById('progressBar'); if (bar) bar.style.width = (currentPhase==='Preboarding'?preboardingProgress:onboardingProgress)+'%';
+    }
+
+    // =====================================
+    //    Persönliches-FUNKTIONEN (Reiter)
+    // =====================================
+    function loadPersoenliches() {
+      currentPhase='Persönliches'; updateProfileProgress();
+      document.getElementById('content').innerHTML = `
+        <div class="section">
+          <h2>Persönliches</h2>
+          <button class="step-button" onclick="openDocument('Arbeitsvertrag.pdf')">📝 Arbeitsvertrag</button>
+          <button class="step-button" onclick="openDocument('Lohnabrechnung.pdf')">💰 Lohnabrechnung</button>
+          <button class="step-button" onclick="openDocument('Sonstiges.pdf')">📂 Sonstiges</button>
+          <button class="step-button" onclick="loadDashboard()">Zurück zum Dashboard</button>
+        </div>`;
+    }
+    function openDocument(file) {
+      document.getElementById('modalBody').innerHTML = `<iframe src="${file}" width="100%" height="600px"></iframe>`;
+      document.getElementById('modal').style.display='flex';
+    }
+
+    // Schließen auf Overlay
+    document.getElementById('modal').addEventListener('click', e=>{ if(e.target===document.getElementById('modal')) closeModal(); });
+
+    // =====================================
+    //    Preboarding-FUNKTIONEN (Reiter)
+    // =====================================
+    function loadPreboarding() {
+      currentPhase='Preboarding'; updateProfileProgress();
+      document.getElementById('content').innerHTML = `
+        <div class="section">
+          <h2>Preboarding</h2>
+          <button class="step-button" onclick="openTeamIntro()">👥 Team kennenlernen</button>
+          <button class="step-button" onclick="startPreboardingChecklist()">✅ Checkliste bearbeiten</button>
+          <button class="step-button" onclick="loadDashboard()">Zurück</button>
+        </div>`;
+    }
+    function openTeamIntro(){ document.getElementById('content').innerHTML=`<div class="section"><h2>Team kennenlernen</h2><iframe src="2410_hv_teamplakat.pdf" style="width:100%;height:600px;"></iframe><button class="step-button" onclick="loadPreboarding()">Zurück</button></div>`; }
+    function startPreboardingChecklist(){document.getElementById('content').innerHTML=`<div class="section"><h2>Preboarding Checkliste</h2>${['Vertrag unterschreiben','Personalbogen','IT-Zugänge','Willkommenspaket','Ansprechpartner'].map(i=>`<div><input type="checkbox" onchange="increment('preboarding')"> ${i}</div>`).join('')}<button class="step-button" onclick="loadPreboarding()">Zurück</button></div>`;}
+
+    function increment(phase){ if(phase==='preboarding') preboardingProgress++; else onboardingProgress++; updateProfileProgress(); }
+
+    // =====================================
+    //    Onboarding-FUNKTIONEN (Reiter)
+    // =====================================
+    function loadOnboarding(){ currentPhase='Onboarding'; onboardingProgress=0; updateProfileProgress();
+      document.getElementById('content').innerHTML=`<div class="section"><h2>Onboarding</h2>${['1. Tag','1. Monat','Probezeitende'].map(s=>`<button class="step-button" onclick="showStep('${s}')">${s}</button>`).join('')}<button class="step-button" onclick="loadDashboard()">Zurück</button><div id="stepContent"></div></div>`;
+    }
+    function showStep(step){
+      const lists={
+        '1. Tag':['Einführungsgespräch','Arbeitsplatz einrichten'],
+        '1. Monat':['Team-Meeting','Feedbackgespräch'],
+        'Probezeitende':['Abschlussgespräch','Entwicklungsplan']
+      };
+      document.getElementById('stepContent').innerHTML=`<div><h3>${step}</h3>${lists[step].map(i=>`<div><input type="checkbox" onchange="increment('onboarding')"> ${i}</div>`).join('')}<button class="step-button" onclick="loadOnboarding()">Zurück</button></div>`;
+    }
+
+ // =====================================
+//         POSTBOARDING-FUNKTIONEN
+// =====================================
+function loadPostboarding() {
+  currentPhase = 'Postboarding';
+  document.getElementById('content').innerHTML = `
+    <div class="section">
+      <h2>Postboarding</h2>
+      <p>Willkommen in deinem Postboarding-Bereich! Wähle aus:</p>
+      <button class="step-button" onclick="startPostboardingChecklist()">✅ Checkliste bearbeiten</button>
+      <button class="step-button" onclick="enterLearningEnvironment()">📖 Lernumgebung betreten</button>
+      <button class="step-button" onclick="loadDashboard()">Zurück zum Dashboard</button>
+      <div class="progress-bar"><div id="progressBar" class="progress-bar-fill"></div></div>
+    </div>
+  `;
+  updateProfileProgress();
+}
+
+// ===== Checkliste =====
+function startPostboardingChecklist() {
+  document.getElementById('content').innerHTML = `
+    <div class="section">
+      <h2>Postboarding Checkliste</h2>
+      <div class="checklist-item"><input type="checkbox" onchange="updateProgress(this, 'postboarding')"> Abschlussgespräch führen</div>
+      <div class="checklist-item"><input type="checkbox" onchange="updateProgress(this, 'postboarding')"> Perspektivgespräch planen</div>
+      <div class="checklist-item"><input type="checkbox" onchange="updateProgress(this, 'postboarding')"> Feedbackbogen abgeben</div>
+      <div class="progress-bar"><div id="progressBar" class="progress-bar-fill"></div></div>
+      <button class="step-button" onclick="loadPostboarding()">Zurück</button>
+    </div>
+  `;
+  updateProfileProgress();
+}
+
+// ===== Lernumgebung =====
+function enterLearningEnvironment() {
+  document.getElementById('content').innerHTML = `
+    <div class="section">
+      <h2>Lernumgebung</h2>
+      <p>Hier findest du deinen individuellen Lernbereich:</p>
+      <button class="step-button" onclick="startLearningStyleTest()">🧠 Lernstiltest (VARK)</button>
+      <button class="step-button" onclick="openLibrary()">📚 Bibliothek</button>
+      <button class="step-button" onclick="startQuizArea()">📝 Quizbereich</button>
+      <button class="step-button" onclick="loadPostboarding()">Zurück</button>
+    </div>
+  `;
+}
+
+    // =====================================
+//         LERNSTILTEST (VARK)
+// =====================================
+let varkAnswers = { V: 0, A: 0, R: 0, K: 0 };
+let currentQuestionIndex = 0;
+
+const varkQuestions = [
+  {
+    question: "Du willst lernen, wie ein neues Gerät funktioniert. Was tust du?",
+    options: {
+      V: "Ich schaue mir ein Diagramm oder eine Grafik an.",
+      A: "Ich frage jemanden, es mir zu erklären.",
+      R: "Ich lese die Bedienungsanleitung.",
+      K: "Ich probiere das Gerät direkt aus."
+    }
+  },
+  {
+    question: "Wenn du Anweisungen zu einem neuen Ort bekommst, bevorzugst du:",
+    options: {
+      V: "Eine Karte anschauen.",
+      A: "Erklärungen anhören.",
+      R: "Eine schriftliche Beschreibung.",
+      K: "Den Weg selbst ausprobieren."
+    }
+  },
+  {
+    question: "Du musst ein neues Softwaresystem erlernen. Wie gehst du vor?",
+    options: {
+      V: "Mit visuellen Tutorials.",
+      A: "Jemand erklärt es mir.",
+      R: "Ich lese Anleitungen.",
+      K: "Ich klicke herum und probiere es aus."
+    }
+  },
+  {
+    question: "Was machst du bei einem interessanten Vortrag?",
+    options: {
+      V: "Ich schaue auf die Folien.",
+      A: "Ich höre intensiv zu.",
+      R: "Ich lese mit oder notiere viel.",
+      K: "Ich beobachte und mache mit, wenn möglich."
+    }
+  },
+  {
+    question: "Wie bereitest du dich auf eine Präsentation vor?",
+    options: {
+      V: "Ich visualisiere Folien und Diagramme.",
+      A: "Ich spreche laut mit anderen oder mir selbst.",
+      R: "Ich schreibe ein Skript.",
+      K: "Ich übe sie durch Bewegung oder Gestik."
+    }
+  },
+  {
+    question: "Wenn du anderen etwas erklärst, machst du das am liebsten:",
+    options: {
+      V: "Mit Skizzen oder Bildern.",
+      A: "Indem ich es ihnen erkläre.",
+      R: "Indem ich ihnen etwas zum Lesen gebe.",
+      K: "Indem ich es ihnen zeige oder sie es selbst tun lasse."
+    }
+  },
+  {
+    question: "In einer Lerngruppe profitierst du am meisten, wenn:",
+    options: {
+      V: "Diagramme und Mindmaps erstellt werden.",
+      A: "Diskussionen geführt werden.",
+      R: "Skripte ausgeteilt werden.",
+      K: "Rollenspiele oder Übungen gemacht werden."
+    }
+  },
+  {
+    question: "Was hilft dir beim Merken von Fakten?",
+    options: {
+      V: "Bilder im Kopf.",
+      A: "Lautes Wiederholen.",
+      R: "Listen und Zusammenfassungen.",
+      K: "Bewegung oder Nachspielen."
+    }
+  },
+  {
+    question: "Wie beschreibst du am besten ein Rezept?",
+    options: {
+      V: "Ich zeichne es als Ablauf oder Bild.",
+      A: "Ich erkläre es mündlich.",
+      R: "Ich schreibe es Schritt für Schritt auf.",
+      K: "Ich zeige es durch Vormachen."
+    }
+  },
+  {
+    question: "Du liest ein interessantes Thema – was machst du?",
+    options: {
+      V: "Ich suche Grafiken oder Videos.",
+      A: "Ich diskutiere darüber.",
+      R: "Ich schreibe eine Zusammenfassung.",
+      K: "Ich erzähle es nach oder wende es direkt an."
+    }
+  },
+  {
+    question: "Was hilft dir bei der Prüfungsvorbereitung am meisten?",
+    options: {
+      V: "Skizzen und Diagramme.",
+      A: "Lautes Wiederholen oder erklären lassen.",
+      R: "Alte Klausuren lesen.",
+      K: "Anwendungsaufgaben oder Bewegung."
+    }
+  },
+  {
+    question: "Du willst dir einen Namen merken:",
+    options: {
+      V: "Ich stelle mir das Gesicht vor.",
+      A: "Ich spreche den Namen laut.",
+      R: "Ich schreibe ihn auf.",
+      K: "Ich verbinde ihn mit einer Bewegung."
+    }
+  },
+  {
+    question: "Du sollst dich in ein neues Thema einarbeiten. Was bevorzugst du?",
+    options: {
+      V: "Schautafeln oder Infografiken.",
+      A: "Ein Podcast oder Vortrag.",
+      R: "Ein Fachtext oder Buch.",
+      K: "Ein Workshop mit Praxisbezug."
+    }
+  },
+  {
+    question: "Was bevorzugst du in Schulungen?",
+    options: {
+      V: "Flipcharts oder Videos.",
+      A: "Mündliche Erläuterungen.",
+      R: "Skripte und Notizen.",
+      K: "Praktische Übungen."
+    }
+  },
+  {
+    question: "Was macht dir beim Lernen am meisten Spaß?",
+    options: {
+      V: "Bilder und Farben.",
+      A: "Gespräche und Zuhören.",
+      R: "Lesen und Schreiben.",
+      K: "Bewegung und Handeln."
+    }
+  },
+  {
+    question: "Wie erklärst du am liebsten, wie ein Gerät funktioniert?",
+    options: {
+      V: "Ich male eine Skizze.",
+      A: "Ich erkläre es mündlich.",
+      R: "Ich schreibe eine Anleitung.",
+      K: "Ich demonstriere es live."
+    }
+  }
+];
+
+function startLearningStyleTest() {
+  varkAnswers = { V: 0, A: 0, R: 0, K: 0 };
+  currentQuestionIndex = 0;
+  showVarkQuestion();
+}
+
+function showVarkQuestion() {
+  if (currentQuestionIndex >= varkQuestions.length) {
+    showVarkResult();
+    return;
+  }
+  const q = varkQuestions[currentQuestionIndex];
+let optionsHtml = "";
+for (const key in q.options) {
+  optionsHtml += `
+    <div class="checklist-item">
+      <span>${q.options[key]}</span>
+      <input type="radio" name="varkOption" value="${key}">
+    </div>
+  `;
+}
+
+
+
+  document.getElementById('content').innerHTML = `
+    <div class="section">
+      <h2>Lernstiltest (Frage ${currentQuestionIndex + 1} von ${varkQuestions.length})</h2>
+      <p><strong>${q.question}</strong></p>
+      ${optionsHtml}
+      <button class="step-button" onclick="nextVarkQuestion()">Weiter</button>
+      <button class="step-button" onclick="enterLearningEnvironment()">Abbrechen</button>
+    </div>
+  `;
+}
+
+function nextVarkQuestion() {
+  const selected = document.querySelector('input[name="varkOption"]:checked');
+  if (!selected) {
+    alert("Bitte wähle eine Antwort aus!");
+    return;
+  }
+  varkAnswers[selected.value]++;
+  currentQuestionIndex++;
+  showVarkQuestion();
+}
+
+function showVarkResult() {
+  const sorted = Object.entries(varkAnswers).sort((a, b) => b[1] - a[1]);
+  const style1 = varkTypeName(sorted[0][0]);
+  const style2 = varkTypeName(sorted[1][0]);
+  document.getElementById('content').innerHTML = `
+    <div class="section">
+      <h2>Dein Lernstil-Ergebnis</h2>
+      <p>Deine dominanten Lernstile sind:</p>
+      <ul>
+        <li><strong>${style1}</strong></li>
+        <li><strong>${style2}</strong></li>
+      </ul>
+      <button class="step-button" onclick="enterLearningEnvironment()">Zurück zur Lernumgebung</button>
+    </div>
+  `;
+}
+
+function varkTypeName(code) {
+  switch (code) {
+    case 'V': return "Visuell";
+    case 'A': return "Auditiv";
+    case 'R': return "Lesen/Schreiben";
+    case 'K': return "Kinästhetisch";
+    default: return "";
+  }
+}
+
+    // =====================================
+    //    Bibliothek (Reiter)
+    // =====================================
+
+
+function openLibrary() {
+  document.getElementById('content').innerHTML = `
+    <div class="section">
+      <h2>Bibliothek</h2>
+      <p>Wähle ein Kapitel aus:</p>
+      <button class="step-button" onclick="openKapitel(1)">Kapitel 1</button>
+      <button class="step-button" onclick="openKapitel(2)">Kapitel 2</button>
+      <button class="step-button" onclick="openKapitel(3)">Kapitel 3</button>
+      <button class="step-button" onclick="openKapitel(4)">Kapitel 4</button>
+      <button class="step-button" onclick="openKapitel(5)">Kapitel 5</button>
+      <button class="step-button" onclick="enterLearningEnvironment()">Zurück zur Lernumgebung</button>
+    </div>
+  `;
+}
+
+function openKapitel(nr) {
+  document.getElementById('content').innerHTML = `
+    <div class="section">
+      <h2>Kapitel ${nr}</h2>
+      <h3>🖼️ Visuell</h3>
+      <p><a href="#">Grafik oder Video (Dummy)</a></p>
+
+      <h3>🎧 Auditiv</h3>
+      <p><a href="#">Podcast oder Audio-Erklärung (Dummy)</a></p>
+
+      <h3>📖 Lesen/Schreiben</h3>
+      <p><a href="#">Text-/PDF-Dokument (Dummy)</a></p>
+
+      <h3>🖐️ Kinästhetisch</h3>
+      <p><a href="#">Anleitung für Übung / Anwendung (Dummy)</a></p>
+
+      <button class="step-button" onclick="openLibrary()">Zurück zur Bibliothek</button>
+    </div>
+  `;
+}
+
+    // =====================================
+    //    Quizbereich (Reiter)
+    // =====================================
+    function startQuizArea(){ document.getElementById('content').innerHTML=`<div class="section"><h2>Quizbereich</h2><button class="step-button" onclick="startDummyQuiz()">Quiz starten</button><button class="step-button" onclick="loadDashboard()">Zurück</button></div>`; }
+    function startDummyQuiz(){ document.getElementById('content').innerHTML=`<div class="section"><h2>Dummy Quiz</h2><p>Was gehört zu gutem Immobilienmanagement?</p><button onclick="alert('Richtig!')">Transparenz</button><button onclick="alert('Falsch!')">Geheimhaltung</button><button class="step-button" onclick="startQuizArea()">Zurück</button></div>`; }
+
+    // =====================================
+    //    MODAL-FUNKTION
+    // =====================================
+    function closeModal(){ document.getElementById('modal').style.display='none'; }
+  </script>
+</body>
+</html>
